@@ -20,7 +20,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 				Name: "http_requests_total",
 				Help: "Total number of HTTP requests.",
 			},
-			[]string{"method", "path"},
+			[]string{"method", "path", "code"},
 		),
 		HttpRequestDuration: promauto.With(reg).NewHistogramVec(
 			prometheus.HistogramOpts{
@@ -28,7 +28,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 				Help:    "Duration of HTTP requests.",
 				Buckets: prometheus.DefBuckets,
 			},
-			[]string{"method", "path"},
+			[]string{"method", "path", "code"},
 		),
 		ProviderRequestsTotal: promauto.With(reg).NewCounterVec(
 			prometheus.CounterOpts{

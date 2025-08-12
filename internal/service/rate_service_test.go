@@ -1,38 +1,45 @@
+// In file: internal/service/rate_service_test.go
+
 package service
 
 import (
 	"context"
+	"errors"
+	"io"
+	"log/slog"
 	"testing"
 	"time"
 
 	"github.com/Devashish08/ExchangeRateService/internal/domain"
-	"github.com/Devashish08/ExchangeRateService/internal/metrics" // Import metrics package
-	"github.com/Devashish08/ExchangeRateService/internal/provider"
+	"github.com/Devashish08/ExchangeRateService/internal/metrics"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
 
-// Mocks
-
-// MockFiatProvider implements provider.FiatProvider for tests.
 type MockFiatProvider struct {
 	mock.Mock
 }
-
-var _ provider.FiatProvider = (*MockFiatProvider)(nil)
 
 func (m *MockFiatProvider) FetchLatestRates(ctx context.Context, base domain.Currency, targets []domain.Currency) ([]domain.ExchangeRate, error) {
 	args := m.Called(ctx, base, targets)
 	return args.Get(0).([]domain.ExchangeRate), args.Error(1)
 }
 
-func (m *MockFiatProvider) FetchHistoricalRate(ctx context.Context, date time.Time, base, target domain.Currency) (domain.ExchangeRate, error) {
-	args := m.Called(ctx, date, base, target)
-	return args.Get(0).(domain.ExchangeRate), args.Error(1)
+func (m *MockFiatProvider) FetchHistoricalRates(ctx context.Context, date time.Time, base domain.Currency, targets []domain.Currency) ([]domain.ExchangeRate, error) {
+	args := m.Called(ctx, date, base, targets)
+	return args.Get(0).([]domain.ExchangeRate), args.Error(1)
 }
 
-// MockRepository mocks the RateRepository interface.
+type MockCryptoProvider struct {
+	mock.Mock
+}
+
+func (m *MockCryptoProvider) FetchCryptoRates(ctx context.Context, baseFiat domain.Currency, cryptos []domain.Currency) ([]domain.ExchangeRate, error) {
+	args := m.Called(ctx, baseFiat, cryptos)
+	return args.Get(0).([]domain.ExchangeRate), args.Error(1)
+}
+
 type MockRepository struct {
 	mock.Mock
 }
@@ -47,92 +54,106 @@ func (m *MockRepository) GetLatestRate(ctx context.Context, from, to domain.Curr
 	return args.Get(0).(domain.ExchangeRate), args.Error(1)
 }
 
-// helper
-func setupDummyMetrics() *metrics.Metrics {
-	// Use a dummy registry for tests to avoid interfering with the global one.
-	return metrics.NewMetrics(prometheus.NewRegistry())
+type testSetup struct {
+	service    *RateService
+	mockFiat   *MockFiatProvider
+	mockCrypto *MockCryptoProvider
+	mockRepo   *MockRepository
+	logger     *slog.Logger
+	metrics    *metrics.Metrics
+	config     Config
 }
 
-// Tests
+func newTestSetup() testSetup {
+	mockFiat := new(MockFiatProvider)
+	mockCrypto := new(MockCryptoProvider)
+	mockRepo := new(MockRepository)
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	reg := prometheus.NewRegistry()
+	m := metrics.NewMetrics(reg)
+
+	config := Config{
+		BaseCurrency:  domain.USD,
+		FiatTargets:   []domain.Currency{domain.EUR},
+		CryptoTargets: []domain.Currency{domain.BTC},
+	}
+
+	service := NewRateService(mockFiat, mockCrypto, mockRepo, config, logger, m)
+
+	return testSetup{
+		service:    service,
+		mockFiat:   mockFiat,
+		mockCrypto: mockCrypto,
+		mockRepo:   mockRepo,
+		logger:     logger,
+		metrics:    m,
+		config:     config,
+	}
+}
+
+func TestRefreshRates_Success(t *testing.T) {
+	ts := newTestSetup()
+
+	ts.mockFiat.On("FetchLatestRates", mock.Anything, ts.config.BaseCurrency, ts.config.FiatTargets).Return([]domain.ExchangeRate{{From: "USD", To: "EUR", Rate: 0.9}}, nil)
+	ts.mockCrypto.On("FetchCryptoRates", mock.Anything, ts.config.BaseCurrency, ts.config.CryptoTargets).Return([]domain.ExchangeRate{{From: "USD", To: "BTC", Rate: 50000}}, nil)
+	ts.mockRepo.On("UpdateLatestRates", mock.Anything, mock.AnythingOfType("[]domain.ExchangeRate")).Return(nil)
+
+	ts.service.RefreshRates(context.Background())
+
+	ts.mockFiat.AssertExpectations(t)
+	ts.mockCrypto.AssertExpectations(t)
+	ts.mockRepo.AssertExpectations(t)
+}
+
+func TestRefreshRates_PartialFailure(t *testing.T) {
+	ts := newTestSetup()
+
+	ts.mockFiat.On("FetchLatestRates", mock.Anything, mock.Anything, mock.Anything).Return([]domain.ExchangeRate{}, errors.New("fiat provider down"))
+	ts.mockCrypto.On("FetchCryptoRates", mock.Anything, mock.Anything, mock.Anything).Return([]domain.ExchangeRate{{From: "USD", To: "BTC", Rate: 50000}}, nil)
+	ts.mockRepo.On("UpdateLatestRates", mock.Anything, mock.AnythingOfType("[]domain.ExchangeRate")).Return(nil)
+
+	ts.service.RefreshRates(context.Background())
+
+	ts.mockCrypto.AssertExpectations(t)
+	ts.mockRepo.AssertExpectations(t)
+}
 
 func TestConvertAmount_Latest(t *testing.T) {
-	mockRepo := new(MockRepository)
-	mockRepo.On("GetLatestRate", mock.Anything, domain.USD, domain.INR).Return(domain.ExchangeRate{Rate: 83.5}, nil)
+	ts := newTestSetup()
+	ts.mockRepo.On("GetLatestRate", mock.Anything, domain.USD, domain.EUR).Return(domain.ExchangeRate{Rate: 0.9}, nil)
 
-	rateService := NewRateService(nil, nil, mockRepo, nil)
-
-	result, err := rateService.ConvertAmount(context.Background(), 100, domain.USD, domain.INR, nil)
+	result, err := ts.service.ConvertAmount(context.Background(), 100, domain.USD, domain.EUR, nil)
 
 	assert.NoError(t, err)
-	assert.NotNil(t, result)
-	assert.Equal(t, 8350.0, result.ConvertedAmount)
-	mockRepo.AssertExpectations(t)
+	assert.Equal(t, 90.0, result.ConvertedAmount)
+	ts.mockRepo.AssertExpectations(t)
 }
 
-func TestConvertAmount_Historical_ExceedsLimit(t *testing.T) {
-	rateService := NewRateService(nil, nil, nil, nil)
-	oldDate := time.Now().AddDate(0, 0, -91)
-	result, err := rateService.ConvertAmount(context.Background(), 100, domain.USD, domain.INR, &oldDate)
-	assert.Nil(t, result)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "90-day historical data limit")
-}
+func TestConvertAmount_Historical(t *testing.T) {
+	ts := newTestSetup()
+	historicalDate := time.Now().UTC().AddDate(0, 0, -10)
+	ts.mockFiat.On("FetchHistoricalRates", mock.Anything, historicalDate, domain.USD, []domain.Currency{domain.EUR, domain.JPY}).Return([]domain.ExchangeRate{
+		{From: "USD", To: "EUR", Rate: 0.9},
+		{From: "USD", To: "JPY", Rate: 150},
+	}, nil)
 
-func TestConvertAmount_Historical_Fiat(t *testing.T) {
-	mockFiatProvider := new(MockFiatProvider)
-	historicalDate := time.Now().AddDate(0, 0, -10)
-	mockFiatProvider.On("FetchHistoricalRate", mock.Anything, historicalDate, domain.USD, domain.EUR).Return(domain.ExchangeRate{Rate: 0.95}, nil)
-
-	rateService := NewRateService(mockFiatProvider, nil, nil, nil)
-
-	result, err := rateService.ConvertAmount(context.Background(), 100, domain.USD, domain.EUR, &historicalDate)
+	result, err := ts.service.ConvertAmount(context.Background(), 100, domain.EUR, domain.JPY, &historicalDate)
 
 	assert.NoError(t, err)
-	assert.NotNil(t, result)
-	assert.Equal(t, 95.0, result.ConvertedAmount)
-	mockFiatProvider.AssertExpectations(t)
+	assert.InDelta(t, 16666.67, result.ConvertedAmount, 0.01)
+	ts.mockFiat.AssertExpectations(t)
 }
 
-func TestConvertAmount_Historical_CryptoBlocked(t *testing.T) {
-	rateService := NewRateService(nil, nil, nil, nil)
-	validDate := time.Now().AddDate(0, 0, -5)
-	result, err := rateService.ConvertAmount(context.Background(), 1, domain.USD, domain.BTC, &validDate)
-	assert.Nil(t, result)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "historical data is not available for cryptocurrencies")
-}
+func TestConvertAmount_Errors(t *testing.T) {
+	ts := newTestSetup()
 
-// Test that metrics are incremented on provider success.
-func TestRefreshRates_MetricsSuccess(t *testing.T) {
-	// Setup
-	mockFiatProvider := new(MockFiatProvider)
-	mockCryptoProvider := new(MockCryptoProvider) // We need a mock for the crypto provider now
-	mockRepo := new(MockRepository)
-	dummyMetrics := setupDummyMetrics()
+	oldDate := time.Now().UTC().AddDate(0, 0, -91)
+	_, err := ts.service.ConvertAmount(context.Background(), 100, domain.USD, domain.EUR, &oldDate)
+	assert.ErrorIs(t, err, ErrDateOutOfRange)
 
-	// Define expected return values for providers
-	mockFiatProvider.On("FetchLatestRates", mock.Anything, mock.Anything, mock.Anything).Return([]domain.ExchangeRate{{From: "USD", To: "INR", Rate: 83.0, Date: time.Now()}}, nil)
-	mockCryptoProvider.On("FetchCryptoRates", mock.Anything, mock.Anything, mock.Anything).Return([]domain.ExchangeRate{}, nil) // Return empty but successful
-	mockRepo.On("UpdateLatestRates", mock.Anything, mock.Anything).Return(nil)
-
-	rateService := NewRateService(mockFiatProvider, mockCryptoProvider, mockRepo, dummyMetrics)
-
-	// Execute
-	rateService.RefreshRates(context.Background())
-
-	// Assert expectations on provider calls.
-	mockFiatProvider.AssertExpectations(t)
-	mockCryptoProvider.AssertExpectations(t)
-}
-
-// Helper mock for the crypto provider
-type MockCryptoProvider struct {
-	mock.Mock
-}
-
-var _ provider.CryptoProvider = (*MockCryptoProvider)(nil)
-
-func (m *MockCryptoProvider) FetchCryptoRates(ctx context.Context, baseFiat domain.Currency, cryptos []domain.Currency) ([]domain.ExchangeRate, error) {
-	args := m.Called(ctx, baseFiat, cryptos)
-	return args.Get(0).([]domain.ExchangeRate), args.Error(1)
+	validDate := time.Now().UTC().AddDate(0, 0, -10)
+	_, err = ts.service.ConvertAmount(context.Background(), 100, domain.USD, domain.BTC, &validDate)
+	assert.ErrorIs(t, err, ErrHistoricalCrypto)
 }
