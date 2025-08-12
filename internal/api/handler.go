@@ -5,16 +5,18 @@ import (
 	"strconv"
 	"time"
 
-	"exchange-rate-service/internal/domain"
-	"exchange-rate-service/internal/service"
+	"github.com/Devashish08/ExchangeRateService/internal/domain"
+	"github.com/Devashish08/ExchangeRateService/internal/service"
 
 	"github.com/go-chi/render"
 )
 
+// ConversionHandler handles currency conversion HTTP requests.
 type ConversionHandler struct {
 	rateService *service.RateService
 }
 
+// NewConversionHandler constructs a ConversionHandler bound to a RateService.
 func NewConversionHandler(s *service.RateService) *ConversionHandler {
 	return &ConversionHandler{rateService: s}
 }

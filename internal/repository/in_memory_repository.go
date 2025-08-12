@@ -22,8 +22,7 @@ func NewInMemoryRateRepository() *InMemoryRateRepository {
 	}
 }
 
-// UpdateLatestRates replaces the entire in-memory store with the provided
-// set of rates.
+// UpdateLatestRates replaces the entire in-memory store with the provided set of rates.
 func (r *InMemoryRateRepository) UpdateLatestRates(ctx context.Context, rates []domain.ExchangeRate) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
