@@ -29,5 +29,5 @@ type ExchangeRate struct {
 }
 
 type ConversionResult struct {
-	ConvertedAmount float64 `json:"amount`
+	ConvertedAmount float64 `json:"amount"`
 }
