@@ -10,7 +10,7 @@ import (
 // FiatProvider defines operations for fetching fiat exchange rates.
 type FiatProvider interface {
 	FetchLatestRates(ctx context.Context, base domain.Currency, targets []domain.Currency) ([]domain.ExchangeRate, error)
-	FetchHistoricalRate(ctx context.Context, date time.Time, base, target domain.Currency) (domain.ExchangeRate, error)
+	FetchHistoricalRates(ctx context.Context, date time.Time, base domain.Currency, targets []domain.Currency) ([]domain.ExchangeRate, error)
 }
 
 // CryptoProvider defines operations for fetching cryptocurrency exchange rates.

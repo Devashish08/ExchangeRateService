@@ -1,4 +1,3 @@
-
 package provider
 
 import (
@@ -96,47 +95,55 @@ func (p *ExchangeRateHostProvider) FetchLatestRates(ctx context.Context, base do
 	return rates, nil
 }
 
-func (p *ExchangeRateHostProvider) FetchHistoricalRate(ctx context.Context, date time.Time, base, target domain.Currency) (domain.ExchangeRate, error) {
+func (p *ExchangeRateHostProvider) FetchHistoricalRates(ctx context.Context, date time.Time, base domain.Currency, targets []domain.Currency) ([]domain.ExchangeRate, error) {
 	dateStr := date.Format("2006-01-02")
+
+	var symbols []string
+	for _, t := range targets {
+		symbols = append(symbols, string(t))
+	}
+
 	reqURL := fmt.Sprintf("%s/historical?access_key=%s&date=%s&source=%s&currencies=%s",
-		exchangeRateHostBaseURL, p.apiKey, dateStr, base, target)
+		exchangeRateHostBaseURL, p.apiKey, dateStr, base, strings.Join(symbols, ","))
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
-		return domain.ExchangeRate{}, fmt.Errorf("create historical request: %w", err)
+		return nil, fmt.Errorf("create historical request: %w", err)
 	}
 
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return domain.ExchangeRate{}, fmt.Errorf("execute historical request: %w", err)
+		return nil, fmt.Errorf("execute historical request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return domain.ExchangeRate{}, fmt.Errorf("read historical response body: %w", err)
+		return nil, fmt.Errorf("read historical response body: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return domain.ExchangeRate{}, fmt.Errorf("historical API returned non-200 status code: %d - body: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("historical API returned non-200 status code: %d - body: %s", resp.StatusCode, string(body))
 	}
 
 	var apiResp apiResponse
 	if err := json.Unmarshal(body, &apiResp); err != nil {
-		return domain.ExchangeRate{}, fmt.Errorf("unmarshal historical json response: %w", err)
+		return nil, fmt.Errorf("unmarshal historical json response: %w", err)
 	}
 
 	if !apiResp.Success {
-		return domain.ExchangeRate{}, fmt.Errorf("exchangerate.host API indicated failure for historical rate: %s", apiResp.Error.Info)
+		return nil, fmt.Errorf("exchangerate.host API indicated failure for historical rate: %s", apiResp.Error.Info)
 	}
 
-	quoteKey := string(base) + string(target)
-	rateValue, ok := apiResp.Quotes[quoteKey]
-	if !ok {
-		return domain.ExchangeRate{}, fmt.Errorf("target currency pair %s not found in historical response", quoteKey)
+	var rates []domain.ExchangeRate
+	for key, rate := range apiResp.Quotes {
+		if len(key) == 6 {
+			from := domain.Currency(key[0:3])
+			to := domain.Currency(key[3:6])
+			rates = append(rates, domain.ExchangeRate{
+				From: from, To: to, Rate: rate, Date: date,
+			})
+		}
 	}
-
-	return domain.ExchangeRate{
-		From: base, To: target, Rate: rateValue, Date: date,
-	}, nil
+	return rates, nil
 }

@@ -1,4 +1,4 @@
-// Command server runs the exchange-rate HTTP API and metrics endpoint.
+// In file: cmd/api/main.go
 
 package main
 
@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Devashish08/ExchangeRateService/internal/api"
+	"github.com/Devashish08/ExchangeRateService/internal/domain"
 	"github.com/Devashish08/ExchangeRateService/internal/metrics"
 	"github.com/Devashish08/ExchangeRateService/internal/provider"
 	"github.com/Devashish08/ExchangeRateService/internal/repository"
@@ -25,7 +26,6 @@ import (
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -40,7 +40,15 @@ func main() {
 	repo := repository.NewInMemoryRateRepository()
 	fiatProvider := provider.NewExchangeRateHostProvider(apiKey)
 	cryptoProvider := provider.NewCoinGeckoProvider()
-	rateService := service.NewRateService(fiatProvider, cryptoProvider, repo, m)
+
+	serviceConfig := service.Config{
+		BaseCurrency:  domain.USD,
+		FiatTargets:   []domain.Currency{domain.INR, domain.EUR, domain.JPY, domain.GBP},
+		CryptoTargets: []domain.Currency{domain.BTC, domain.ETH, domain.USDT},
+	}
+
+	// CORRECTED: Add the 'm' (metrics) object as the final argument.
+	rateService := service.NewRateService(fiatProvider, cryptoProvider, repo, serviceConfig, logger, m)
 
 	go func() {
 		logger.Info("Performing initial rate refresh...")
@@ -77,7 +85,6 @@ func main() {
 	<-quit
 
 	logger.Info("Shutting down server...")
-
 	cancel()
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 15*time.Second)
