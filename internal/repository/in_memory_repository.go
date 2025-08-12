@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/Devahish08/ExchangeRateService/internal/domain"
+	"github.com/Devashish08/ExchangeRateService/internal/domain"
 )
 
 // InMemoryRateRepository stores the latest exchange rates in memory.
@@ -22,8 +22,7 @@ func NewInMemoryRateRepository() *InMemoryRateRepository {
 	}
 }
 
-// UpdateLatestRates replaces the entire in-memory store with the provided
-// set of rates.
+// UpdateLatestRates replaces the entire in-memory store with the provided set of rates.
 func (r *InMemoryRateRepository) UpdateLatestRates(ctx context.Context, rates []domain.ExchangeRate) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

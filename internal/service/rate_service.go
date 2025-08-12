@@ -2,65 +2,122 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"log"
+	"time"
 
-	"github.com/Devahish08/ExchangeRateService/internal/domain"
-	"github.com/Devahish08/ExchangeRateService/internal/provider"
-	"github.com/Devahish08/ExchangeRateService/internal/repository"
+	"github.com/Devashish08/ExchangeRateService/internal/domain"
+	"github.com/Devashish08/ExchangeRateService/internal/metrics"
+	"github.com/Devashish08/ExchangeRateService/internal/provider"
+	"github.com/Devashish08/ExchangeRateService/internal/repository"
 )
 
-// RateService orchestrates fetching exchange rates from a provider and storing
-// them in a repository.
 type RateService struct {
-	provider     *provider.ExchangeRateHostProvider
-	repo         repository.RateRepository
-	baseCurrency domain.Currency
+	fiatProvider   provider.FiatProvider
+	cryptoProvider provider.CryptoProvider
+	repo           repository.RateRepository
+	baseCurrency   domain.Currency
+	metrics        *metrics.Metrics
 }
 
-// NewRateService returns a RateService configured with the given provider and
-// repository. The base currency is fixed to USD.
-func NewRateService(p *provider.ExchangeRateHostProvider, r repository.RateRepository) *RateService {
+// NewRateService constructs a RateService with the provided providers, repository, and metrics.
+func NewRateService(fiatP provider.FiatProvider, cryptoP provider.CryptoProvider, r repository.RateRepository, m *metrics.Metrics) *RateService {
 	return &RateService{
-		provider:     p,
-		repo:         r,
-		baseCurrency: domain.USD,
+		fiatProvider:   fiatP,
+		cryptoProvider: cryptoP,
+		repo:           r,
+		baseCurrency:   domain.USD,
+		metrics:        m,
 	}
 }
 
-// RefreshRates fetches the latest rates and updates the repository. It is safe
-// to call periodically from a scheduler.
+// RefreshRates fetches latest rates from providers, merges fiat and crypto, and updates the repository.
 func (s *RateService) RefreshRates(ctx context.Context) {
-	log.Println("Starting rate refresh")
+	log.Println("Starting rate refresh for fiat and crypto...")
 
-	targets := []domain.Currency{domain.INR, domain.EUR, domain.JPY, domain.GBP}
-
-	baseRates, err := s.provider.FetchLatestRates(ctx, s.baseCurrency, targets)
+	fiatTargets := []domain.Currency{domain.INR, domain.EUR, domain.JPY, domain.GBP}
+	fiatRates, err := s.fiatProvider.FetchLatestRates(ctx, s.baseCurrency, fiatTargets)
 	if err != nil {
-		log.Printf("ERROR: fetch latest rates: %v", err)
+		log.Printf("ERROR: failed to fetch fiat rates: %v", err)
+		s.metrics.ProviderRequestsTotal.WithLabelValues("fiat", "failure").Inc()
 		return
 	}
+	s.metrics.ProviderRequestsTotal.WithLabelValues("fiat", "success").Inc()
 
-	if len(baseRates) == 0 {
-		log.Printf("WARN: provider returned zero base rates; skipping update")
-		return
-	}
-
-	allRates := s.calculateAllPairs(baseRates)
-
-	err = s.repo.UpdateLatestRates(ctx, allRates)
+	cryptoTargets := []domain.Currency{domain.BTC, domain.ETH, domain.USDT}
+	cryptoRates, err := s.cryptoProvider.FetchCryptoRates(ctx, s.baseCurrency, cryptoTargets)
 	if err != nil {
-		log.Printf("ERROR: update repository with new rates: %v", err)
+		log.Printf("ERROR: failed to fetch crypto rates: %v", err)
+		s.metrics.ProviderRequestsTotal.WithLabelValues("crypto", "failure").Inc()
 	} else {
-		log.Printf("Refreshed and stored %d rate pairs", len(allRates))
+		s.metrics.ProviderRequestsTotal.WithLabelValues("crypto", "success").Inc()
+	}
+
+	allBaseRates := append(fiatRates, cryptoRates...)
+	if len(allBaseRates) == 0 {
+		log.Printf("WARN: all providers returned zero base rates; skipping update")
+		return
+	}
+
+	allPairs := s.calculateAllPairs(allBaseRates)
+	err = s.repo.UpdateLatestRates(ctx, allPairs)
+	if err != nil {
+		log.Printf("ERROR: failed to update repository with new rates: %v", err)
+	} else {
+		log.Printf("Refreshed and stored %d rate pairs (including crypto).", len(allPairs))
 	}
 }
 
-// calculateAllPairs derives rates for all supported currency pairs using the
-// base-currency rates via cross rates.
+// ConvertAmount converts an amount between currencies using latest or historical rates.
+func (s *RateService) ConvertAmount(ctx context.Context, amount float64, from, to domain.Currency, date *time.Time) (*domain.ConversionResult, error) {
+	var finalRate float64
+
+	if date != nil {
+		if from.IsCrypto() || to.IsCrypto() {
+			return nil, fmt.Errorf("historical data is not available for cryptocurrencies")
+		}
+
+		if (*date).Before(time.Now().AddDate(0, 0, -90)) {
+			return nil, fmt.Errorf("date is beyond the 90-day historical data limit")
+		}
+
+		if from == s.baseCurrency {
+			rate, err := s.fiatProvider.FetchHistoricalRate(ctx, *date, from, to)
+			if err != nil {
+				return nil, fmt.Errorf("could not fetch historical rate for %s->%s: %w", from, to, err)
+			}
+			finalRate = rate.Rate
+		} else {
+			rateTo, err := s.fiatProvider.FetchHistoricalRate(ctx, *date, s.baseCurrency, to)
+			if err != nil {
+				return nil, fmt.Errorf("could not fetch historical base->to rate: %w", err)
+			}
+			rateFrom, err := s.fiatProvider.FetchHistoricalRate(ctx, *date, s.baseCurrency, from)
+			if err != nil {
+				return nil, fmt.Errorf("could not fetch historical base->from rate: %w", err)
+			}
+			finalRate = rateTo.Rate / rateFrom.Rate
+		}
+	} else {
+		rate, err := s.repo.GetLatestRate(ctx, from, to)
+		if err != nil {
+			return nil, fmt.Errorf("could not get latest rate from cache: %w", err)
+		}
+		finalRate = rate.Rate
+	}
+
+	convertedAmount := amount * finalRate
+	return &domain.ConversionResult{ConvertedAmount: convertedAmount}, nil
+}
+
+// calculateAllPairs derives all pairwise rates (fiat and crypto) from base rates.
 func (s *RateService) calculateAllPairs(baseRates []domain.ExchangeRate) []domain.ExchangeRate {
 	rateMap := make(map[domain.Currency]float64)
 	rateMap[s.baseCurrency] = 1.0
 
+	if len(baseRates) == 0 {
+		return []domain.ExchangeRate{}
+	}
 	ratesDate := baseRates[0].Date
 
 	for _, rate := range baseRates {
@@ -68,7 +125,10 @@ func (s *RateService) calculateAllPairs(baseRates []domain.ExchangeRate) []domai
 	}
 
 	var allRates []domain.ExchangeRate
-	supportedCurrencies := []domain.Currency{domain.USD, domain.INR, domain.EUR, domain.JPY, domain.GBP}
+	supportedCurrencies := []domain.Currency{
+		domain.USD, domain.INR, domain.EUR, domain.JPY, domain.GBP,
+		domain.BTC, domain.ETH, domain.USDT,
+	}
 
 	for _, from := range supportedCurrencies {
 		for _, to := range supportedCurrencies {

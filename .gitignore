@@ -1,0 +1,37 @@
+# Binaries
+server
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Build outputs
+bin/
+build/
+dist/
+tmp/
+*.out
+*.test
+coverage.*
+*.log
+
+# IDE/editor
+.idea/
+.vscode/
+.fleet/
+.DS_Store
+
+# Dependencies
+vendor/
+node_modules/
+
+# Environment and secrets
+.env
+.env.*
+*.env
+
+# Docker overrides and local artifacts
+.docker/
+docker-compose.override.yml
+
+
