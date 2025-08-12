@@ -1,4 +1,4 @@
-module github.com/Devahish08/ExchangeRateService
+module github.com/Devashish08/ExchangeRateService
 
 go 1.22
 

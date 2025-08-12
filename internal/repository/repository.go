@@ -3,7 +3,7 @@ package repository
 import (
 	"context"
 
-	"github.com/Devahish08/ExchangeRateService/internal/domain"
+	"github.com/Devashish08/ExchangeRateService/internal/domain"
 )
 
 // RateRepository defines the persistence contract for storing and retrieving

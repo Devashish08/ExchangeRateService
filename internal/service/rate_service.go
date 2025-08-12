@@ -6,9 +6,9 @@ import (
 	"log"
 	"time"
 
-	"github.com/Devahish08/ExchangeRateService/internal/domain"
-	"github.com/Devahish08/ExchangeRateService/internal/provider"
-	"github.com/Devahish08/ExchangeRateService/internal/repository"
+	"github.com/Devashish08/ExchangeRateService/internal/domain"
+	"github.com/Devashish08/ExchangeRateService/internal/provider"
+	"github.com/Devashish08/ExchangeRateService/internal/repository"
 )
 
 // RateService orchestrates fetching exchange rates from a provider and storing

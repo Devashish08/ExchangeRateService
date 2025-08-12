@@ -8,10 +8,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Devahish08/ExchangeRateService/internal/api"
-	"github.com/Devahish08/ExchangeRateService/internal/provider"
-	"github.com/Devahish08/ExchangeRateService/internal/repository"
-	"github.com/Devahish08/ExchangeRateService/internal/service"
+	"github.com/Devashish08/ExchangeRateService/internal/api"
+	"github.com/Devashish08/ExchangeRateService/internal/provider"
+	"github.com/Devashish08/ExchangeRateService/internal/repository"
+	"github.com/Devashish08/ExchangeRateService/internal/service"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"

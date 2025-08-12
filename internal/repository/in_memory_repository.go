@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/Devahish08/ExchangeRateService/internal/domain"
+	"github.com/Devashish08/ExchangeRateService/internal/domain"
 )
 
 // InMemoryRateRepository stores the latest exchange rates in memory.

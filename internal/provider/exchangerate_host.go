@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Devahish08/ExchangeRateService/internal/domain"
+	"github.com/Devashish08/ExchangeRateService/internal/domain"
 )
 
 const exchangeRateHostAPI = "https://api.exchangerate.host/latest"
