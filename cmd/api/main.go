@@ -38,7 +38,7 @@ func main() {
 	reg := prometheus.NewRegistry()
 	m := metrics.NewMetrics(reg)
 	repo := repository.NewInMemoryRateRepository()
-	fiatProvider := provider.NewExchangeRateHostProvider(apiKey)
+	fiatProvider := provider.NewExchangeRateHostProvider(apiKey, provider.DefaultExchangeRateHostBaseURL)
 	cryptoProvider := provider.NewCoinGeckoProvider()
 
 	serviceConfig := service.Config{
@@ -47,7 +47,6 @@ func main() {
 		CryptoTargets: []domain.Currency{domain.BTC, domain.ETH, domain.USDT},
 	}
 
-	// CORRECTED: Add the 'm' (metrics) object as the final argument.
 	rateService := service.NewRateService(fiatProvider, cryptoProvider, repo, serviceConfig, logger, m)
 
 	go func() {
