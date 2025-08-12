@@ -43,7 +43,7 @@ func (r *InMemoryRateRepository) GetLatestRate(ctx context.Context, from, to dom
 	key := fmt.Sprintf("%s_%s", from, to)
 	rate, ok := r.latestRates[key]
 	if !ok {
-		return domain.ExchangeRate{}, fmt.Errorf("rate not found for %s to %s", from, to)
+		return domain.ExchangeRate{}, fmt.Errorf("%w for %s to %s", ErrRateNotFound, from, to)
 	}
 	return rate, nil
 }
