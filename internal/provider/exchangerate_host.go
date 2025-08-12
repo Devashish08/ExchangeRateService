@@ -89,3 +89,40 @@ func (p *ExchangeRateHostProvider) FetchLatestRates(ctx context.Context, base do
 
 	return rates, nil
 }
+
+func (p *ExchangeRateHostProvider) FetchHistoricalRate(ctx context.Context, date time.Time, base, target domain.Currency) (domain.ExchangeRate, error) {
+	dateStr := date.Format("2006-01-02")
+	reqURL := fmt.Sprintf("https://api.exchangerate.host/%s?base=%s&symbols=%s", dateStr, base, target)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return domain.ExchangeRate{}, fmt.Errorf("create historical request: %w", err)
+	}
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return domain.ExchangeRate{}, fmt.Errorf("execute historical request to %s: %w", reqURL, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return domain.ExchangeRate{}, fmt.Errorf("historical API returned non-200 status code: %d", resp.StatusCode)
+	}
+
+	var apiResp apiResponse
+	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+		return domain.ExchangeRate{}, fmt.Errorf("unmarshal historical json response: %w", err)
+	}
+
+	rateValue, ok := apiResp.Rates[string(target)]
+	if !ok {
+		return domain.ExchangeRate{}, fmt.Errorf("target currency %s not found in historical response", target)
+	}
+
+	return domain.ExchangeRate{
+		From: base,
+		To:   target,
+		Rate: rateValue,
+		Date: date,
+	}, nil
+}

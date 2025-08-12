@@ -1,25 +1,52 @@
+// In file: cmd/api/main.go
+
 package main
 
 import (
 	"context"
 	"log"
+	"net/http"
 	"time"
 
+	"github.com/Devahish08/ExchangeRateService/internal/api"
 	"github.com/Devahish08/ExchangeRateService/internal/provider"
 	"github.com/Devahish08/ExchangeRateService/internal/repository"
 	"github.com/Devahish08/ExchangeRateService/internal/service"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 )
 
-// main wires the application components and performs a one-time rate refresh.
-// In production, this would run an HTTP API and schedule periodic refreshes.
 func main() {
-	prov := provider.NewExchangeRateHostProvider()
+	ctx := context.Background()
 	repo := repository.NewInMemoryRateRepository()
-	svc := service.NewRateService(prov, repo)
+	prov := provider.NewExchangeRateHostProvider()
+	rateService := service.NewRateService(prov, repo)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
+	log.Println("Performing initial rate refresh...")
+	rateService.RefreshRates(ctx)
 
-	svc.RefreshRates(ctx)
-	log.Println("Startup refresh completed")
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				rateService.RefreshRates(context.Background())
+			}
+		}
+	}()
+
+	conversionHandler := api.NewConversionHandler(rateService)
+
+	r := chi.NewRouter()
+	r.Use(middleware.Logger)    // Basic logging middleware
+	r.Use(middleware.Recoverer) // Panic recovery
+
+	r.Get("/convert", conversionHandler.ServeHTTP)
+
+	log.Println("Starting server on :8080")
+	if err := http.ListenAndServe(":8080", r); err != nil {
+		log.Fatalf("Failed to start server: %v", err)
+	}
 }

@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"log"
+	"time"
 
 	"github.com/Devahish08/ExchangeRateService/internal/domain"
 	"github.com/Devahish08/ExchangeRateService/internal/provider"
@@ -87,4 +89,47 @@ func (s *RateService) calculateAllPairs(baseRates []domain.ExchangeRate) []domai
 		}
 	}
 	return allRates
+}
+
+func (s *RateService) ConvertAmount(ctx context.Context, amount float64, from, to domain.Currency, date *time.Time) (*domain.ConversionResult, error) {
+	var finalRate float64
+
+	if date != nil {
+		// --- Historical Conversion ---
+		// Enforce 90-day lookback limit
+		if (*date).Before(time.Now().AddDate(0, 0, -90)) {
+			return nil, fmt.Errorf("date is beyond the 90-day historical data limit")
+		}
+
+		// Fetch historical rate. We may need to do a cross-currency calculation.
+		// To get FROM -> TO, we calculate (BASE -> TO) / (BASE -> FROM)
+		if from == s.baseCurrency {
+			rate, err := s.provider.FetchHistoricalRate(ctx, *date, from, to)
+			if err != nil {
+				return nil, fmt.Errorf("could not fetch historical rate for %s->%s: %w", from, to, err)
+			}
+			finalRate = rate.Rate
+		} else {
+			// Fetch both 'from' and 'to' rates relative to the base currency (USD)
+			rateTo, err := s.provider.FetchHistoricalRate(ctx, *date, s.baseCurrency, to)
+			if err != nil {
+				return nil, fmt.Errorf("could not fetch historical base->to rate: %w", err)
+			}
+			rateFrom, err := s.provider.FetchHistoricalRate(ctx, *date, s.baseCurrency, from)
+			if err != nil {
+				return nil, fmt.Errorf("could not fetch historical base->from rate: %w", err)
+			}
+			finalRate = rateTo.Rate / rateFrom.Rate
+		}
+	} else {
+		// --- Latest Rate Conversion ---
+		rate, err := s.repo.GetLatestRate(ctx, from, to)
+		if err != nil {
+			return nil, fmt.Errorf("could not get latest rate from cache: %w", err)
+		}
+		finalRate = rate.Rate
+	}
+
+	convertedAmount := amount * finalRate
+	return &domain.ConversionResult{ConvertedAmount: convertedAmount}, nil
 }
