@@ -74,11 +74,11 @@ func (s *RateService) ConvertAmount(ctx context.Context, amount float64, from, t
 
 	if date != nil {
 		if from.IsCrypto() || to.IsCrypto() {
-			return nil, fmt.Errorf("historical data is not available for cryptocurrencies")
+			return nil, ErrHistoricalCrypto
 		}
 
 		if (*date).Before(time.Now().AddDate(0, 0, -90)) {
-			return nil, fmt.Errorf("date is beyond the 90-day historical data limit")
+			return nil, ErrDateOutOfRange
 		}
 
 		if from == s.baseCurrency {

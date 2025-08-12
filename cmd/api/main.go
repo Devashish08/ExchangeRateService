@@ -49,13 +49,15 @@ func main() {
 
 	go startRateRefresher(ctx, logger, rateService)
 
+	conversionHandler := api.NewConversionHandler(rateService, logger)
+
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(api.MetricsMiddleware(m))
 
 	r.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
-	r.Get("/convert", api.NewConversionHandler(rateService).ServeHTTP)
+	r.Get("/convert", conversionHandler.ServeHTTP)
 
 	srv := &http.Server{
 		Addr:    ":8080",
